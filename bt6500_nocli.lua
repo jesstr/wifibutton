@@ -11,12 +11,8 @@ local state = 0
 local attempt = 5
 local connected = 0
 
-cmds = {
-    "relay R3 info\n",
-    "relay R3 on\n",
-    "relay R3 info\n",
-    "relay R3 off\n"
-}
+local recv_state = 1
+local prompt = "bt6500 ~]"
 
 
 gpio.mode(pin, gpio.OUTPUT)
@@ -41,10 +37,8 @@ function toggleLED ()
 
     if n == count then
         tmr.stop(0)
---        node.dsleep(0)
     end 
 end
-
 
 
 function shutdown(relay_state) 
@@ -53,86 +47,62 @@ function shutdown(relay_state)
     if relay_state == 1 then 
         --led_blink(2, 200)
         count = 2
-        tmr.alarm(0, 200, 1, toggleLED)
+        tmr.alarm(0, 250, 1, toggleLED)
     end
     if relay_state == 0 then 
         --led_blink(1, 200)
         count = 1
-        tmr.alarm(0, 200, 1, toggleLED)
+        tmr.alarm(0, 250, 1, toggleLED)
     end
     conn:send("exit\n")
     conn:close()
+    --node.dsleep(0)
 end
 
---echo 1 > /proc/outs/7
 
-function set_relay_cb(c, relay, state)
-    if string.find(c, "Switch relay")~=nil then
-        conn:send("relay " .. relay .. " info\n")
-    end
-    if string.find(c, "bt6500#")~=nil then
-        conn:send("relay " .. relay .. " " .. state .. "\n")
-    end
-    if string.find(c, "service relay, Opened")~=nil then
-        relay_state = 1
-        shutdown(relay_state) 
-    end
-    if string.find(c, "service relay, Closed")~=nil then
-        relay_state = 0
-        shutdown(relay_state) 
-    end
-end
+function switch_output_cb(c, out)
 
-function switch_relay_cb(c, relay)
-    if string.find(c, "Switch relay")~=nil then
-        conn:send("relay " .. relay .. " info\n")
-    end
-    if string.find(c, "service relay, Opened")~=nil then
-        relay_state = 1
-        conn:send("relay " .. relay .. " off\n")
-        if state == 1 then
-            shutdown(relay_state) 
+    if recv_state == 1 then
+        if string.find(c, prompt)~=nil then
+            conn:send("cat /proc/outs/" .. out .. " > /proc/outs/" .. out .. "\n")
+            recv_state = recv_state + 1
         end
-        state = 1    
-    end
-    if string.find(c, "service relay, Closed")~=nil then
-        relay_state = 0
-        conn:send("relay " .. relay .. " on\n")
-        if state == 1 then
-            shutdown(relay_state) 
+    elseif recv_state == 2 then
+        if string.find(c, prompt)~=nil then
+            conn:send("cat /proc/outs/" .. out .. "\n")
+            recv_state = recv_state + 1
         end
-        state = 1
-    end
-     if string.find(c, "bt6500#")~=nil then
-        conn:send("relay " .. relay .. " info\n")
+    elseif recv_state == 3 then
+        if string.find(c, prompt)~=nil then
+             if string.find(c, "1%[")~=nil  then
+                relay_state = 1
+                recv_state = recv_state + 1
+                shutdown(relay_state) 
+            end 
+            if string.find(c, "0%[")~=nil then
+                relay_state = 0
+                recv_state = recv_state + 1
+                shutdown(relay_state) 
+            end
+        end
     end
 end
+
 
 function login_cb(c)
     if string.find(c, "bt6500 login:")~=nil then
-            conn:send("admin\n")
+            conn:send("hidden\n")
     end 
     if string.find(c, "Password:")~=nil then
         conn:send("12345\n")
     end    
-    if string.find(c, "bt6500#")~=nil then
+    if string.find(c, prompt)~=nil then
         print("Logged in")
         loggedin=1
-        gpio.write(pin, gpio.HIGH)
+        --gpio.write(pin, gpio.HIGH)
     end
 end
 
-function commands_cb(c)
-    if cmds[i]==nil then   
-        conn:close()
-        print("Connection closed")
-    end
-    if string.find(c, "bt6500#")~=nil then
-        conn:send(cmds[i])
-        i=i+1
-    end 
-
-end
 
 function connect()
     print("Connecting..")
@@ -140,8 +110,7 @@ function connect()
 
     conn:on("connection", function(conn, c) 
         print("Connected")
-        --led_blink(1, 100)
-        gpio.write(pin, gpio.LOW)
+        --gpio.write(pin, gpio.LOW)
         connected = 1
     end )
     
@@ -151,11 +120,8 @@ function connect()
         if loggedin==0 then
             login_cb(c)
         end
-
-        --commands_cb(c);
         
-        --set_relay_cb(c, "R3", "off")
-        switch_relay_cb(c, "R1")
+            switch_output_cb(c, 6)
         
     end )
     
