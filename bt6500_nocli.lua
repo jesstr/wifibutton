@@ -56,7 +56,9 @@ function shutdown(relay_state)
     end
     conn:send("exit\n")
     conn:close()
-    --node.dsleep(0)
+    tmr.alarm(3, 1000, 1, function ()
+        node.dsleep(0)
+        end)
 end
 
 
